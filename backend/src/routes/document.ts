@@ -55,11 +55,12 @@ router.get("/list", async (req: Request, res: Response) => {
 
     // Map repos to same shape with github: prefix
     const repoDocs = (repoRows ?? []).map((row: any) => ({
+      // Prefix GitHub repos so the frontend can distinguish repository sources from file uploads.
       source:     `github:${row.repo_name}`,
       uploadedAt: row.indexed_at,
     }))
 
-    // Combine — PDFs first, then repos
+    // Combine — PDFs first, then repos so the UI can show uploaded documents before indexed repos.
     const documents = [...pdfDocs, ...repoDocs]
 
     console.log(`✅ Documents list: ${pdfDocs.length} PDFs + ${repoDocs.length} repos`)
@@ -87,6 +88,7 @@ router.delete("/delete", async (req: Request, res: Response) => {
       return
     }
 
+    // A GitHub repo source is identified by the github: prefix and is stored in repo_trees.
     const isRepo = source.startsWith("github:")
     console.log(`🗑  Delete — user: ${userId}  source: ${source}  type: ${isRepo ? "repo" : "pdf"}`)
 
