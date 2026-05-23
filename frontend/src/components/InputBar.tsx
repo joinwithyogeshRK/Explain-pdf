@@ -715,6 +715,7 @@ export const InputBar = ({
                         : "Voice input (mic)"
                   }
                   side="top"
+                  align="end"
                 >
                   <motion.button
                     key="mic"
@@ -746,7 +747,7 @@ export const InputBar = ({
 
             <AnimatePresence mode="wait">
               {isStreaming ? (
-                <Tooltip content="Stop generating" side="top">
+                <Tooltip content="Stop generating" side="top" align="end">
                   <motion.button
                     key="stop"
                     type="button"
@@ -769,6 +770,7 @@ export const InputBar = ({
                 <Tooltip
                   content={sendEnabled ? "Send message" : "Type a message to send"}
                   side="top"
+                  align="end"
                 >
                   <motion.button
                     key="send"

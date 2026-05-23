@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion"
-import { MessageSquare, Plus, Trash2, X } from "lucide-react"
+import { MessageSquare, PanelLeftClose, Plus, Trash2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface Chat {
@@ -10,6 +10,7 @@ interface Chat {
 
 interface Props {
   open: boolean
+  mode?: "overlay" | "docked"
   chats: Chat[]
   activeChatId: string | null
   loading: boolean
@@ -29,6 +30,7 @@ const formatDate = (iso: string) =>
 
 export const Sidebar = ({
   open,
+  mode = "overlay",
   chats,
   activeChatId,
   loading,
@@ -36,37 +38,41 @@ export const Sidebar = ({
   onNewChat,
   onSelectChat,
   onDeleteChat,
-}: Props) => (
-  <AnimatePresence>
-    {open && (
-      <>
-        <motion.div
-          className="fixed inset-0 z-10 bg-black/40 backdrop-blur-sm"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={onClose}
-        />
-        <motion.aside
-          className="glass-panel fixed bottom-0 left-0 top-0 z-20 flex w-[min(320px,88vw)] flex-col border-r border-border"
-          initial={{ x: -320 }}
-          animate={{ x: 0 }}
-          exit={{ x: -320 }}
-          transition={{ type: "spring", damping: 28, stiffness: 260 }}
-        >
-          <div className="flex items-center justify-between border-b border-border/80 px-4 py-5">
-            <span className="font-mono text-[10px] font-semibold tracking-[0.25em] text-accent">
-              CHAT HISTORY
-            </span>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label="Close sidebar"
-            >
-              <X className="h-4 w-4" />
-            </button>
+}: Props) => {
+  const aside = (
+    <motion.aside
+      className={cn(
+        "glass-panel z-20 flex w-[min(320px,88vw)] shrink-0 flex-col border-r border-border",
+        mode === "overlay" ? "fixed bottom-0 left-0 top-0" : "relative h-full w-[300px] shadow-none"
+      )}
+      initial={mode === "overlay" ? { x: -320 } : { opacity: 0, width: 0 }}
+      animate={mode === "overlay" ? { x: 0 } : { opacity: 1, width: 300 }}
+      exit={mode === "overlay" ? { x: -320 } : { opacity: 0, width: 0 }}
+      transition={{ type: "spring", damping: 28, stiffness: 260 }}
+    >
+      <div className="flex items-center justify-between border-b border-border/80 px-4 py-5">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-extrabold tracking-wide text-foreground">
+            Oracle
           </div>
+          <div className="mt-0.5 font-mono text-[9px] font-semibold tracking-[0.2em] text-accent/75">
+            CHATS
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg border border-border bg-card/70 p-2 text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+          aria-label={mode === "overlay" ? "Close sidebar" : "Hide chat history"}
+          title={mode === "overlay" ? "Close sidebar" : "Hide chat history"}
+        >
+          {mode === "overlay" ? (
+            <X className="h-4 w-4" />
+          ) : (
+            <PanelLeftClose className="h-4 w-4" />
+          )}
+        </button>
+      </div>
 
           <button
             type="button"
@@ -74,7 +80,7 @@ export const Sidebar = ({
               onNewChat()
               onClose()
             }}
-            className="mx-3 mt-3 flex items-center gap-2 rounded-xl border border-dashed border-accent/25 bg-accent/5 px-3.5 py-2.5 font-mono text-[10px] font-semibold tracking-wider text-accent/80 transition-colors hover:border-accent/45 hover:bg-accent/10 hover:text-accent"
+            className="mx-3 mt-3 flex items-center gap-2 rounded-xl border border-dashed border-accent/25 bg-accent/5 px-3.5 py-2.5 font-mono text-[10px] font-extrabold tracking-wider text-accent/80 transition-colors hover:border-accent/45 hover:bg-accent/10 hover:text-accent"
           >
             <Plus className="h-3 w-3" />
             NEW CHAT
@@ -116,8 +122,8 @@ export const Sidebar = ({
                   <div className="flex items-center gap-2.5">
                     <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs text-foreground">{chat.title}</p>
-                      <p className="mt-0.5 font-mono text-[10px] text-muted-foreground/70">
+                      <p className="truncate text-sm font-bold text-foreground">{chat.title}</p>
+                      <p className="mt-0.5 font-mono text-[10px] font-bold text-muted-foreground/80">
                         {formatDate(chat.created_at)}
                       </p>
                     </div>
@@ -137,8 +143,25 @@ export const Sidebar = ({
               ))
             )}
           </div>
-        </motion.aside>
-      </>
-    )}
-  </AnimatePresence>
-)
+    </motion.aside>
+  )
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <>
+          {mode === "overlay" && (
+            <motion.div
+              className="fixed inset-0 z-10 bg-black/40 backdrop-blur-sm"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={onClose}
+            />
+          )}
+          {aside}
+        </>
+      )}
+    </AnimatePresence>
+  )
+}

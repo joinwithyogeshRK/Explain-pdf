@@ -1,13 +1,16 @@
 import { useState, useRef, useEffect } from "react"
 import axios from "axios"
 import { motion, AnimatePresence } from "framer-motion"
-import { useAuth } from "@clerk/react"
+import { useAuth, useClerk, useUser } from "@clerk/react"
+import { LogOut, Moon, PanelLeft, Plus, Sun } from "lucide-react"
 import { Background } from "../components/Background"
 import { Header } from "../components/Header"
 import { Sidebar } from "../components/Sidebar"
 import { MessageList } from "../components/MessageList"
 import { InputBar } from "../components/InputBar"
 import { useRecorder } from "../hooks/useRecorder"
+import { useIsMobile } from "../hooks/useIsMobile"
+import { useTheme } from "../context/theme"
 
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:3009"
 
@@ -27,7 +30,11 @@ interface Document {
 
 const ChatPage = () => {
   const { isSignedIn, getToken } = useAuth()
+  const { signOut } = useClerk()
+  const { user } = useUser()
+  const { theme, toggleTheme } = useTheme()
   const signedIn = Boolean(isSignedIn)
+  const isMobile = useIsMobile()
 
   const { isRecording, isTranscribing, recError, startRecording, stopRecording } =
     useRecorder({
@@ -50,6 +57,7 @@ const ChatPage = () => {
   const [currentQ, setCurrentQ] = useState("")
   const [chatId, setChatId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(false)
   const [chats, setChats] = useState<Chat[]>([])
   const [loadingChats, setLoadingChats] = useState(false)
   const [loadingMessages, setLoadingMessages] = useState(false)
@@ -61,20 +69,51 @@ const ChatPage = () => {
   const [githubLogin, setGithubLogin] = useState<string | null>(null)
   const [loadingGitHub, setLoadingGitHub] = useState(false)
   const [connectingGithub, setConnectingGithub] = useState(false)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
 
   const currentResponseRef = useRef("")
   const streamRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const profileMenuRef = useRef<HTMLDivElement | null>(null)
+  const workspaceActivatedRef = useRef(false)
 
   useEffect(() => {
     if (scrollRef.current)
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [response, history, isStreaming])
 
+  const chatStarted =
+    history.length > 0 || Boolean(chatId) || isStreaming || Boolean(response) || Boolean(currentQ)
+
   useEffect(() => {
-    if (sidebarOpen && signedIn) void fetchChats()
-  }, [sidebarOpen, signedIn])
+    if ((sidebarOpen || workspaceSidebarOpen) && signedIn) void fetchChats()
+  }, [sidebarOpen, workspaceSidebarOpen, signedIn])
+
+  useEffect(() => {
+    if (!chatStarted) return
+    if (workspaceActivatedRef.current) return
+    workspaceActivatedRef.current = true
+    setWorkspaceSidebarOpen(false)
+    if (signedIn) void fetchChats()
+  }, [chatStarted, signedIn])
+
+  useEffect(() => {
+    if (!profileMenuOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (profileMenuRef.current?.contains(event.target as Node)) return
+      setProfileMenuOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProfileMenuOpen(false)
+    }
+    document.addEventListener("pointerdown", onPointerDown)
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown)
+      document.removeEventListener("keydown", onKeyDown)
+    }
+  }, [profileMenuOpen])
 
   useEffect(() => {
     if (signedIn) void fetchDocuments()
@@ -142,6 +181,7 @@ const ChatPage = () => {
       setFileName("")
       setMessage("")
       setSidebarOpen(false)
+      setWorkspaceSidebarOpen(false)
     } catch {
       /* ignore */
     } finally {
@@ -288,6 +328,8 @@ const ChatPage = () => {
     currentResponseRef.current = ""
     setCurrentQ("")
     setSelectedSource("all")
+    workspaceActivatedRef.current = false
+    setWorkspaceSidebarOpen(false)
     if (signedIn) setTimeout(() => inputRef.current?.focus(), 100)
   }
 
@@ -368,33 +410,199 @@ const ChatPage = () => {
     }
   }
 
+  const profileInitial =
+    user?.firstName?.[0] ??
+    user?.username?.[0] ??
+    user?.primaryEmailAddress?.emailAddress?.[0] ??
+    "U"
+
   return (
     <div className="relative flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <Background />
 
-      <Sidebar
-        open={sidebarOpen}
-        chats={chats}
-        activeChatId={chatId}
-        loading={loadingChats}
-        onClose={() => setSidebarOpen(false)}
-        onNewChat={handleNewChat}
-        onSelectChat={loadChat}
-        onDeleteChat={deleteChat}
-      />
-
-      <div className="relative z-[1] mx-auto flex h-full w-full max-w-[980px] flex-col px-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 box-border sm:px-5 sm:pb-5 sm:pt-6 lg:px-7">
-        <Header
-          chatId={chatId}
-          file={file}
-          fileName={fileName}
-          onRemoveFile={() => {
-            setFile(null)
-            setFileName("")
-          }}
+      {!chatStarted && (
+        <Sidebar
+          open={sidebarOpen}
+          chats={chats}
+          activeChatId={chatId}
+          loading={loadingChats}
+          onClose={() => setSidebarOpen(false)}
           onNewChat={handleNewChat}
-          onOpenSidebar={() => setSidebarOpen(true)}
+          onSelectChat={loadChat}
+          onDeleteChat={deleteChat}
         />
+      )}
+
+      {chatStarted && isMobile && (
+        <Sidebar
+          open={workspaceSidebarOpen}
+          chats={chats}
+          activeChatId={chatId}
+          loading={loadingChats}
+          onClose={() => setWorkspaceSidebarOpen(false)}
+          onNewChat={handleNewChat}
+          onSelectChat={loadChat}
+          onDeleteChat={deleteChat}
+        />
+      )}
+
+      <div className="relative z-[1] flex h-full w-full">
+        {chatStarted && !isMobile && (
+          <Sidebar
+            open={workspaceSidebarOpen}
+            mode="docked"
+            chats={chats}
+            activeChatId={chatId}
+            loading={loadingChats}
+            onClose={() => setWorkspaceSidebarOpen(false)}
+            onNewChat={handleNewChat}
+            onSelectChat={loadChat}
+            onDeleteChat={deleteChat}
+          />
+        )}
+
+        <main
+          className={
+            chatStarted
+              ? "mx-auto flex h-full min-w-0 flex-1 flex-col px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 box-border sm:px-5 sm:pb-4 sm:pt-4"
+              : "mx-auto flex h-full w-full max-w-[980px] flex-col px-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 box-border sm:px-5 sm:pb-5 sm:pt-6 lg:px-7"
+          }
+        >
+        {!chatStarted ? (
+          <Header
+            chatId={chatId}
+            file={file}
+            fileName={fileName}
+            onRemoveFile={() => {
+              setFile(null)
+              setFileName("")
+            }}
+            onNewChat={handleNewChat}
+            onOpenSidebar={() => setSidebarOpen(true)}
+          />
+        ) : (
+          <div className="mb-2 flex h-12 shrink-0 items-center justify-between border-b border-border/70 px-1 sm:mb-3 sm:h-14 sm:px-2">
+            <div className="flex min-w-0 items-center gap-2">
+              {(!workspaceSidebarOpen || isMobile) && (
+                <button
+                  type="button"
+                  onClick={() => setWorkspaceSidebarOpen(true)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card/70 text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+                  aria-label="Show all chats"
+                  title="Show all chats"
+                >
+                  <PanelLeft className="h-4 w-4" />
+                </button>
+              )}
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-foreground">
+                  Oracle Chat
+                </div>
+                <div className="font-mono text-[9px] tracking-[0.18em] text-muted-foreground">
+                  {chatId ? `#${chatId.slice(0, 8)}` : "ACTIVE SESSION"}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleNewChat}
+                className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card/70 text-muted-foreground shadow-sm transition-colors hover:border-accent/40 hover:bg-muted hover:text-accent"
+                aria-label="New chat"
+                title="New chat"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+              <div ref={profileMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setProfileMenuOpen((open) => !open)}
+                  className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-border bg-card/80 text-sm font-semibold text-accent shadow-sm transition-colors hover:border-accent/40 hover:bg-muted"
+                  aria-label="Open profile menu"
+                  aria-expanded={profileMenuOpen}
+                  title="Profile"
+                >
+                  {user?.imageUrl ? (
+                    <img
+                      src={user.imageUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span>{profileInitial.toUpperCase()}</span>
+                  )}
+                </button>
+
+                <AnimatePresence>
+                  {profileMenuOpen && (
+                    <motion.div
+                      className="absolute right-0 top-full z-30 mt-2 w-64 overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-float)]"
+                      initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                      transition={{ duration: 0.16 }}
+                    >
+                      <div className="border-b border-border px-3.5 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-sm font-semibold text-accent">
+                            {user?.imageUrl ? (
+                              <img
+                                src={user.imageUrl}
+                                alt=""
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              profileInitial.toUpperCase()
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-foreground">
+                              {user?.fullName ?? user?.username ?? "Profile"}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {user?.primaryEmailAddress?.emailAddress ?? "Signed in"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          toggleTheme()
+                          setProfileMenuOpen(false)
+                        }}
+                        className="flex w-full items-center justify-between gap-3 px-3.5 py-3 text-left text-sm text-foreground transition-colors hover:bg-muted"
+                      >
+                        <span className="flex items-center gap-2.5">
+                          {theme === "dark" ? (
+                            <Sun className="h-4 w-4 text-accent" />
+                          ) : (
+                            <Moon className="h-4 w-4 text-accent" />
+                          )}
+                          {theme === "dark" ? "Light mode" : "Dark mode"}
+                        </span>
+                        <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+                          {theme}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void signOut({ redirectUrl: "/" })}
+                        className="flex w-full items-center gap-2.5 border-t border-border px-3.5 py-3 text-left text-sm text-destructive transition-colors hover:bg-destructive/10"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        Logout
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+          </div>
+        )}
 
         <AnimatePresence>
           {loadingMessages && (
@@ -459,6 +667,7 @@ const ChatPage = () => {
           connectingGithub={connectingGithub}
           onConnectGithub={handleConnectGithub}
         />
+        </main>
       </div>
     </div>
   )

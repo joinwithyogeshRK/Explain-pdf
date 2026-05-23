@@ -5,10 +5,17 @@ interface TooltipProps {
   content: string
   children: ReactNode
   side?: "top" | "bottom"
+  align?: "start" | "center" | "end"
   className?: string
 }
 
-export function Tooltip({ content, children, side = "top", className }: TooltipProps) {
+export function Tooltip({
+  content,
+  children,
+  side = "top",
+  align = "center",
+  className,
+}: TooltipProps) {
   const [show, setShow] = useState(false)
 
   return (
@@ -24,8 +31,11 @@ export function Tooltip({ content, children, side = "top", className }: TooltipP
         <span
           role="tooltip"
           className={cn(
-            "pointer-events-none absolute left-1/2 z-[120] w-max max-w-[220px] -translate-x-1/2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-center font-mono text-[10px] leading-snug text-foreground shadow-lg",
-            side === "top" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"
+            "pointer-events-none absolute z-[120] w-max max-w-[min(220px,calc(100vw-24px))] rounded-lg border border-border bg-card px-2.5 py-1.5 text-center font-mono text-[10px] leading-snug text-foreground shadow-lg",
+            side === "top" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]",
+            align === "center" && "left-1/2 -translate-x-1/2",
+            align === "start" && "left-0",
+            align === "end" && "right-0"
           )}
         >
           {content}
