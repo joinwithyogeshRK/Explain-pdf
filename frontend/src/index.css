@@ -111,10 +111,61 @@
     box-shadow: var(--shadow-float);
   }
 
-  .oracle-answer p + p,
-  .oracle-answer p + .oracle-code,
-  .oracle-answer .oracle-code + p {
-    margin-top: 0.75rem;
+  .oracle-answer {
+    color: color-mix(in srgb, var(--foreground) 90%, transparent);
+  }
+
+  .oracle-answer > * + * {
+    margin-top: 0.95rem;
+  }
+
+  .oracle-paragraph {
+    margin: 0;
+    max-width: 76ch;
+    line-height: 1.82;
+  }
+
+  .oracle-heading {
+    margin: 1.15rem 0 0.35rem;
+    color: var(--foreground);
+    font-size: 0.92rem;
+    font-weight: 700;
+    line-height: 1.45;
+  }
+
+  .oracle-answer > .oracle-heading:first-child {
+    margin-top: 0;
+  }
+
+  .oracle-list {
+    margin: 0;
+    max-width: 78ch;
+    padding-left: 1.45rem;
+  }
+
+  .oracle-list li {
+    padding-left: 0.25rem;
+    line-height: 1.78;
+  }
+
+  .oracle-list li + li {
+    margin-top: 0.45rem;
+  }
+
+  .oracle-list li::marker {
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  .oracle-inline-code {
+    border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+    border-radius: 0.38rem;
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    color: color-mix(in srgb, var(--foreground) 92%, var(--accent));
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    padding: 0.08rem 0.32rem;
+    white-space: nowrap;
   }
 
   .oracle-code pre {

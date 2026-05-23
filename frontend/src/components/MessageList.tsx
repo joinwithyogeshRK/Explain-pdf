@@ -1,4 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion"
+import type { ReactNode } from "react"
 import { FileText, Mic, Search } from "lucide-react"
 import hljs from "highlight.js/lib/core"
 import bash from "highlight.js/lib/languages/bash"
@@ -80,15 +81,35 @@ type AnswerPart =
   | { type: "code"; value: string; language?: string }
 
 const fencePattern = /```([^\n`]*)\n?([\s\S]*?)```/g
+const inlinePattern = /(`[^`]+`|\*\*[^*]+\*\*)/g
+
+function normalizeAnswer(answer: string) {
+  let next = answer.trim()
+
+  if (
+    ((next.startsWith('"') && next.endsWith('"')) ||
+      (next.startsWith("'") && next.endsWith("'"))) &&
+    next.length > 1
+  ) {
+    next = next.slice(1, -1)
+  }
+
+  return next
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\"/g, '"')
+    .replace(/\\'/g, "'")
+}
 
 function parseAnswer(answer: string): AnswerPart[] {
   const parts: AnswerPart[] = []
+  const cleanedAnswer = normalizeAnswer(answer)
   let cursor = 0
 
-  for (const match of answer.matchAll(fencePattern)) {
+  for (const match of cleanedAnswer.matchAll(fencePattern)) {
     const index = match.index ?? 0
     if (index > cursor) {
-      parts.push({ type: "text", value: answer.slice(cursor, index) })
+      parts.push({ type: "text", value: cleanedAnswer.slice(cursor, index) })
     }
     parts.push({
       type: "code",
@@ -98,11 +119,11 @@ function parseAnswer(answer: string): AnswerPart[] {
     cursor = index + match[0].length
   }
 
-  if (cursor < answer.length) {
-    parts.push({ type: "text", value: answer.slice(cursor) })
+  if (cursor < cleanedAnswer.length) {
+    parts.push({ type: "text", value: cleanedAnswer.slice(cursor) })
   }
 
-  return parts.length ? parts : [{ type: "text", value: answer }]
+  return parts.length ? parts : [{ type: "text", value: cleanedAnswer }]
 }
 
 function escapeHtml(value: string) {
@@ -157,6 +178,150 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
   )
 }
 
+function Cursor() {
+  return (
+    <motion.span
+      className="ml-0.5 inline-block h-3.5 w-0.5 translate-y-0.5 rounded-sm bg-accent"
+      animate={{ opacity: [1, 0] }}
+      transition={{ duration: 0.5, repeat: Infinity }}
+    />
+  )
+}
+
+function InlineText({ text }: { text: string }) {
+  const nodes: ReactNode[] = []
+  let cursor = 0
+
+  for (const match of text.matchAll(inlinePattern)) {
+    const index = match.index ?? 0
+    if (index > cursor) nodes.push(text.slice(cursor, index))
+
+    const token = match[0]
+    if (token.startsWith("`")) {
+      nodes.push(
+        <code key={`${index}-code`} className="oracle-inline-code">
+          {token.slice(1, -1)}
+        </code>
+      )
+    } else {
+      nodes.push(
+        <strong key={`${index}-strong`} className="font-semibold text-foreground">
+          {token.slice(2, -2)}
+        </strong>
+      )
+    }
+
+    cursor = index + token.length
+  }
+
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return <>{nodes}</>
+}
+
+function cleanLine(line: string) {
+  return line
+    .replace(/^\s*>\s?/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function isListLine(line: string) {
+  return /^\s*(?:[-*•]\s+|\d+[.)]\s+)/.test(line)
+}
+
+function renderList(lines: string[], startIndex: number) {
+  const firstLine = lines[startIndex]
+  const ordered = /^\s*\d+[.)]\s+/.test(firstLine)
+  const items: string[] = []
+  let index = startIndex
+
+  while (index < lines.length) {
+    const line = lines[index]
+    if (!line.trim()) break
+    if (ordered && !/^\s*\d+[.)]\s+/.test(line)) break
+    if (!ordered && !/^\s*[-*•]\s+/.test(line)) break
+
+    items.push(cleanLine(line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "")))
+    index++
+  }
+
+  const ListTag = ordered ? "ol" : "ul"
+
+  return {
+    node: (
+      <ListTag
+        key={`list-${startIndex}`}
+        className={
+          ordered
+            ? "oracle-list list-decimal"
+            : "oracle-list list-disc"
+        }
+      >
+        {items.map((item, itemIndex) => (
+          <li key={`${startIndex}-${itemIndex}`}>
+            <InlineText text={item} />
+          </li>
+        ))}
+      </ListTag>
+    ),
+    nextIndex: index,
+  }
+}
+
+function TextBlock({ text }: { text: string }) {
+  const lines = text.replace(/\r\n/g, "\n").split("\n")
+  const blocks: ReactNode[] = []
+  let index = 0
+
+  while (index < lines.length) {
+    const line = lines[index]
+    const trimmed = line.trim()
+
+    if (!trimmed) {
+      index++
+      continue
+    }
+
+    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/)
+    if (heading) {
+      const HeadingTag = heading[1].length === 1 ? "h3" : "h4"
+      blocks.push(
+        <HeadingTag key={`heading-${index}`} className="oracle-heading">
+          <InlineText text={cleanLine(heading[2])} />
+        </HeadingTag>
+      )
+      index++
+      continue
+    }
+
+    if (isListLine(line)) {
+      const rendered = renderList(lines, index)
+      blocks.push(rendered.node)
+      index = rendered.nextIndex
+      continue
+    }
+
+    const paragraph: string[] = []
+    while (index < lines.length) {
+      const nextLine = lines[index]
+      const nextTrimmed = nextLine.trim()
+      if (!nextTrimmed || isListLine(nextLine) || /^(#{1,3})\s+/.test(nextTrimmed)) {
+        break
+      }
+      paragraph.push(cleanLine(nextLine))
+      index++
+    }
+
+    blocks.push(
+      <p key={`paragraph-${index}`} className="oracle-paragraph">
+        <InlineText text={paragraph.join(" ")} />
+      </p>
+    )
+  }
+
+  return <>{blocks}</>
+}
+
 function AnswerContent({ text, streaming }: { text: string; streaming?: boolean }) {
   const parts = parseAnswer(text)
   const lastPart = parts[parts.length - 1]
@@ -167,25 +332,10 @@ function AnswerContent({ text, streaming }: { text: string; streaming?: boolean 
         part.type === "code" ? (
           <CodeBlock key={index} code={part.value} language={part.language} />
         ) : part.value ? (
-          <p key={index} className="m-0 whitespace-pre-wrap">
-            {part.value}
-            {streaming && index === parts.length - 1 && (
-              <motion.span
-                className="ml-0.5 inline-block h-3.5 w-0.5 translate-y-0.5 rounded-sm bg-accent"
-                animate={{ opacity: [1, 0] }}
-                transition={{ duration: 0.5, repeat: Infinity }}
-              />
-            )}
-          </p>
+          <TextBlock key={index} text={part.value} />
         ) : null
       )}
-      {streaming && lastPart?.type === "code" && (
-        <motion.span
-          className="ml-0.5 inline-block h-3.5 w-0.5 translate-y-0.5 rounded-sm bg-accent"
-          animate={{ opacity: [1, 0] }}
-          transition={{ duration: 0.5, repeat: Infinity }}
-        />
-      )}
+      {streaming && lastPart && <Cursor />}
     </div>
   )
 }
