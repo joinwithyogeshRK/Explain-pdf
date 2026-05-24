@@ -15,6 +15,8 @@ import { useTheme } from "../context/theme"
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:3009"
 const ACTIVE_CHAT_STORAGE_KEY = "oracle.activeChatId"
 
+const getSavedActiveChatId = () => localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY)
+
 interface HistoryItem {
   q: string
   a: string
@@ -56,15 +58,13 @@ const ChatPage = () => {
   const [focused, setFocused] = useState(false)
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [currentQ, setCurrentQ] = useState("")
-  const [chatId, setChatId] = useState<string | null>(null)
+  const [chatId, setChatId] = useState<string | null>(() => getSavedActiveChatId())
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(false)
   const [chats, setChats] = useState<Chat[]>([])
   const [loadingChats, setLoadingChats] = useState(false)
   const [loadingMessages, setLoadingMessages] = useState(false)
-  const [restoringChat, setRestoringChat] = useState(() =>
-    Boolean(localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY))
-  )
+  const [restoringChat, setRestoringChat] = useState(() => Boolean(getSavedActiveChatId()))
   const [documents, setDocuments] = useState<Document[]>([])
   const [selectedSource, setSelectedSource] = useState<string>("all")
   const [loadingDocs, setLoadingDocs] = useState(false)
@@ -218,9 +218,9 @@ const ChatPage = () => {
   }
 
   useEffect(() => {
-    if (!signedIn || restoredChatRef.current || chatId || history.length > 0) return
+    if (!signedIn || restoredChatRef.current || history.length > 0) return
 
-    const savedChatId = localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY)
+    const savedChatId = getSavedActiveChatId()
     if (!savedChatId) return
 
     restoredChatRef.current = true
