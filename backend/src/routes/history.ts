@@ -37,7 +37,10 @@ router.get("/messages/:chatId", async (req, res) => {
 
 router.delete("/chats/:chatId", async (req, res) => {
   try {
-    await deleteChat(req.params.chatId, req.supabaseUserId!);
+    const deletedChat = await deleteChat(req.params.chatId, req.supabaseUserId!);
+    if (!deletedChat) {
+      return res.status(404).json({ error: "Chat not found" });
+    }
     res.json({ message: "Chat deleted" });
   } catch {
     res.status(500).json({ error: "Failed to delete chat" });

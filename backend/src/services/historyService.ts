@@ -73,13 +73,16 @@ export const getChatMessagesForUser = async (
 };
 
 export const deleteChat = async (chatId: string, userId: string) => {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("chats")
     .delete()
     .eq("id", chatId)
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .select("id")
+    .maybeSingle();
 
   if (error) throw error;
+  return data;
 };
 
 export const updateChatTitle = async (

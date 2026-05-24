@@ -13,6 +13,7 @@ import { useIsMobile } from "../hooks/useIsMobile"
 import { useTheme } from "../context/theme"
 
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:3009"
+const ACTIVE_CHAT_STORAGE_KEY = "oracle.activeChatId"
 
 interface HistoryItem {
   q: string
@@ -29,7 +30,7 @@ interface Document {
 }
 
 const ChatPage = () => {
-  const { isSignedIn, getToken } = useAuth()
+  const { isLoaded: authLoaded, isSignedIn, getToken } = useAuth()
   const { signOut } = useClerk()
   const { user } = useUser()
   const { theme, toggleTheme } = useTheme()
@@ -61,6 +62,9 @@ const ChatPage = () => {
   const [chats, setChats] = useState<Chat[]>([])
   const [loadingChats, setLoadingChats] = useState(false)
   const [loadingMessages, setLoadingMessages] = useState(false)
+  const [restoringChat, setRestoringChat] = useState(() =>
+    Boolean(localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY))
+  )
   const [documents, setDocuments] = useState<Document[]>([])
   const [selectedSource, setSelectedSource] = useState<string>("all")
   const [loadingDocs, setLoadingDocs] = useState(false)
@@ -77,6 +81,7 @@ const ChatPage = () => {
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const profileMenuRef = useRef<HTMLDivElement | null>(null)
   const workspaceActivatedRef = useRef(false)
+  const restoredChatRef = useRef(false)
 
   useEffect(() => {
     if (scrollRef.current)
@@ -84,7 +89,13 @@ const ChatPage = () => {
   }, [response, history, isStreaming])
 
   const chatStarted =
-    history.length > 0 || Boolean(chatId) || isStreaming || Boolean(response) || Boolean(currentQ)
+    restoringChat ||
+    loadingMessages ||
+    history.length > 0 ||
+    Boolean(chatId) ||
+    isStreaming ||
+    Boolean(response) ||
+    Boolean(currentQ)
 
   useEffect(() => {
     if ((sidebarOpen || workspaceSidebarOpen) && signedIn) void fetchChats()
@@ -122,6 +133,11 @@ const ChatPage = () => {
   useEffect(() => {
     if (signedIn) void fetchGithubStatus()
   }, [signedIn])
+
+  useEffect(() => {
+    if (!authLoaded || signedIn || !restoringChat) return
+    setRestoringChat(false)
+  }, [authLoaded, signedIn, restoringChat])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -164,7 +180,11 @@ const ChatPage = () => {
     }
   }
 
-  const loadChat = async (selectedChatId: string) => {
+  const loadChat = async (
+    selectedChatId: string,
+    options: { closeSidebars?: boolean } = {}
+  ) => {
+    const { closeSidebars = true } = options
     if (isStreaming) stopStreaming()
     setLoadingMessages(true)
     try {
@@ -177,17 +197,36 @@ const ChatPage = () => {
         )
       )
       setChatId(selectedChatId)
+      localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, selectedChatId)
       setFile(null)
       setFileName("")
       setMessage("")
-      setSidebarOpen(false)
-      setWorkspaceSidebarOpen(false)
+      if (closeSidebars) {
+        setSidebarOpen(false)
+        setWorkspaceSidebarOpen(false)
+      }
+      return true
     } catch {
-      /* ignore */
+      if (localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY) === selectedChatId) {
+        localStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY)
+      }
+      return false
     } finally {
       setLoadingMessages(false)
+      setRestoringChat(false)
     }
   }
+
+  useEffect(() => {
+    if (!signedIn || restoredChatRef.current || chatId || history.length > 0) return
+
+    const savedChatId = localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY)
+    if (!savedChatId) return
+
+    restoredChatRef.current = true
+    setRestoringChat(true)
+    void loadChat(savedChatId, { closeSidebars: false })
+  }, [signedIn, chatId, history.length])
 
   const deleteChat = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -198,13 +237,13 @@ const ChatPage = () => {
       setChats((prev) => prev.filter((c) => c.id !== id))
       if (chatId === id) handleNewChat()
     } catch {
-      /* ignore */
+      void fetchChats()
     }
   }
 
   const renameChat = async (id: string, title: string) => {
     const cleanTitle = title.trim()
-    if (!cleanTitle) return
+    if (!cleanTitle) return false
 
     const previousChats = chats
     setChats((prev) =>
@@ -224,8 +263,10 @@ const ChatPage = () => {
           prev.map((chat) => (chat.id === id ? res.data.chat : chat))
         )
       }
+      return true
     } catch {
       setChats(previousChats)
+      return false
     }
   }
 
@@ -355,6 +396,8 @@ const ChatPage = () => {
     currentResponseRef.current = ""
     setCurrentQ("")
     setSelectedSource("all")
+    localStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY)
+    setRestoringChat(false)
     workspaceActivatedRef.current = false
     setWorkspaceSidebarOpen(false)
     if (signedIn) setTimeout(() => inputRef.current?.focus(), 100)
@@ -414,6 +457,7 @@ const ChatPage = () => {
 
       if (res.data?.chatId && !chatId) {
         setChatId(res.data.chatId)
+        localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, res.data.chatId)
         if (sidebarOpen) void fetchChats()
       }
       typewriterStream(text, q)

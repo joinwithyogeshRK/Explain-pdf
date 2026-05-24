@@ -19,7 +19,7 @@ interface Props {
   onNewChat: () => void
   onSelectChat: (id: string) => void
   onDeleteChat: (id: string, e: React.MouseEvent) => void
-  onRenameChat: (id: string, title: string) => Promise<void>
+  onRenameChat: (id: string, title: string) => Promise<boolean>
 }
 
 const formatDate = (iso: string) =>
@@ -45,6 +45,7 @@ export const Sidebar = ({
   const [editingChatId, setEditingChatId] = useState<string | null>(null)
   const [draftTitle, setDraftTitle] = useState("")
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [renamingChatId, setRenamingChatId] = useState<string | null>(null)
 
   const beginRename = (chat: Chat, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -56,10 +57,16 @@ export const Sidebar = ({
   const saveRename = async (chatId: string, e?: React.MouseEvent) => {
     e?.stopPropagation()
     const title = draftTitle.trim()
-    if (!title) return
-    await onRenameChat(chatId, title)
-    setEditingChatId(null)
-    setDraftTitle("")
+    if (!title || renamingChatId) return
+
+    setRenamingChatId(chatId)
+    const renamed = await onRenameChat(chatId, title)
+    setRenamingChatId(null)
+
+    if (renamed) {
+      setEditingChatId(null)
+      setDraftTitle("")
+    }
   }
 
   const cancelRename = (e?: React.MouseEvent) => {
@@ -140,7 +147,10 @@ export const Sidebar = ({
                   role="button"
                   tabIndex={0}
                   onClick={() => onSelectChat(chat.id)}
-                  onKeyDown={(e) => e.key === "Enter" && onSelectChat(chat.id)}
+                  onKeyDown={(e) => {
+                    if (editingChatId === chat.id) return
+                    if (e.key === "Enter") onSelectChat(chat.id)
+                  }}
                   className={cn(
                     "relative mb-1 cursor-pointer rounded-xl border px-3 py-2.5 transition-colors hover:border-border hover:bg-white/55 dark:hover:bg-muted",
                     activeChatId === chat.id
@@ -157,18 +167,21 @@ export const Sidebar = ({
                           onChange={(e) => setDraftTitle(e.target.value)}
                           onClick={(e) => e.stopPropagation()}
                           onKeyDown={(e) => {
+                            e.stopPropagation()
                             if (e.key === "Enter") void saveRename(chat.id)
                             if (e.key === "Escape") cancelRename()
                           }}
                           className="h-8 w-full rounded-lg border border-accent/35 bg-background px-2 text-sm font-semibold text-foreground outline-none ring-2 ring-accent/10"
                           autoFocus
                           maxLength={80}
+                          disabled={renamingChatId === chat.id}
                         />
                         <div className="mt-1 flex items-center gap-1">
                           <button
                             type="button"
                             onClick={(e) => void saveRename(chat.id, e)}
-                            className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-accent-foreground transition-opacity hover:opacity-90"
+                            disabled={renamingChatId === chat.id}
+                            className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-accent-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                             aria-label="Save chat name"
                             title="Save"
                           >
