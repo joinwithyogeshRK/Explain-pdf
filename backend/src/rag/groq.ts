@@ -74,21 +74,6 @@ export const askGroq = async (
 ): Promise<string> => {
   const hasChunks   = relevantChunks.length > 0
   const hasRepoTree = !!repoContext
-  const repoAnswerGuide = repoContext
-    ? `
-
-Repository answer format:
-- Give a complete answer in one response. Prefer enough detail to solve the user's problem without requiring a follow-up.
-- Before writing, silently identify the user's intent and decide the clearest order for the answer. Do not reveal this planning process.
-- Explain the relevant flow, functions, and files in a natural order. Use numbered steps only when they genuinely make the solution easier to follow.
-- Include focused code snippets when they help. Label each snippet with its file path, keep it relevant to the question, and explain what it does or what should change.
-- Include specific improvement guidance when it is useful for the question.
-- End with a short practical takeaway when the answer benefits from one.
-- Do not show headings such as "Plan", "Step-by-step explanation", "Improvement guidelines", or "Conclusion". Use descriptive headings tied to the user's actual question only when headings improve readability.
-- Do not add filler, invent missing code, or include code snippets when the user only needs a simple file or structure list.
-`
-    : ""
-
   const referenceBlock = hasChunks
     ? relevantChunks.join("\n\n---\n\n")
     : null
@@ -109,22 +94,39 @@ Repository answer format:
   }
 
   if (referenceBlock) {
-    contextBlock += `\n\n=== RELEVANT CODE / CONTENT ===\n${referenceBlock}\n`
+    const referenceTitle = repoContext ? "RETRIEVED REPOSITORY CODE" : "RELEVANT DOCUMENT CONTENT"
+    contextBlock += `\n\n=== ${referenceTitle} ===\n${referenceBlock}\n`
   }
 
-  const systemPrompt = (hasChunks || hasRepoTree)
+  const systemPrompt = repoContext
     ? `${baseVoice}
 
-You have access to the following information about this project. Use it to answer accurately.
+You are explaining the GitHub repository "${repoContext.repoName}".
+
+Repository answer rules:
+- Treat only the repository structure and retrieved repository code below as verified evidence.
+- Never invent routes, files, functions, classes, dependencies, database operations, or runtime behavior.
+- Do not infer implementation details merely from file names, package names, or common framework conventions.
+- If the available code does not prove part of the requested flow, state that the specific detail is not visible in the available code and continue with the verified parts.
+- When explaining a full flow, connect only steps that are directly supported by the available code. Mention the actual file paths and function names.
+- Before writing, silently identify the user's intent and organize the answer in the clearest order. Do not reveal a plan or your internal reasoning.
+- Give a complete, natural answer in one response. Use descriptive headings only when they help the user scan the answer.
+- Do not show generic headings such as "Plan", "Step-by-step explanation", "Improvement guidelines", or "Conclusion".
+- Include focused existing-code snippets only when they help. Keep them faithful to the retrieved code and label them with their file path.
+- If you provide a new or improved snippet, clearly label it as a suggested change so it cannot be confused with existing repository code.
+- Include improvement guidance only when it is relevant to the user's question.
+- Do not mention chunks, passages, retrieval, RAG, embeddings, or hidden context. Do not say "based on the context" or "according to the reference".
+- Do not add filler. For a simple file or structure question, answer directly without unnecessary snippets.
+${contextBlock}`
+    : hasChunks
+    ? `${baseVoice}
+
+You have access to relevant document content. Use it to answer accurately.
 
 Strict rules:
 - Do not mention chunks, passages, retrieval, RAG, embeddings, or "the document" / "provided material" / "Chunk 1".
 - Do not say "based on the context" or "according to the reference". Speak as if you simply know this.
-- For file/structure questions, use the repository structure section to give precise accurate answers.
-- For code questions, use the relevant code section.
 - If something is not in the provided information, say so clearly rather than guessing.
-- Be specific — when listing files, list the actual files. When explaining code, reference actual file paths.
-${repoAnswerGuide}
 ${contextBlock}`
     : `${baseVoice}
 Answer using conversation history and your general knowledge when needed.`
@@ -140,7 +142,7 @@ Answer using conversation history and your general knowledge when needed.`
   const response = await groq.chat.completions.create({
     model:       "llama-3.3-70b-versatile",
     max_tokens:  repoContext ? 2048 : 1024,
-    temperature: 0.35,
+    temperature: repoContext ? 0.2 : 0.35,
     messages,
   })
 
