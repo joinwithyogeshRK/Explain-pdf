@@ -105,8 +105,13 @@ const pdf = async (req: Request, res: Response) => {
     console.log("✅ Step 5 — HyDE generated + embedded")
 
     // Step 6 — Hybrid Search → Rerank
-    const hybridChunks   = await hybridSearch(queryVector, query, bm25Chunks, userId, 5, metadataFilter)
-    const reranked       = await rerankChunks(query, hybridChunks.map(c => c.text))
+    // Repo answers often need context from multiple files, so retrieve a wider
+    // candidate set and keep a few more chunks than we do for PDF questions.
+    const isRepoQuery      = filterSource?.startsWith("github:") ?? false
+    const retrievalTopK    = isRepoQuery ? 12 : 5
+    const rerankTopN       = isRepoQuery ? 8 : 5
+    const hybridChunks     = await hybridSearch(queryVector, query, bm25Chunks, userId, retrievalTopK, metadataFilter)
+    const reranked         = await rerankChunks(query, hybridChunks.map(c => c.text), rerankTopN)
     const relevantChunks = reranked.map(c => c.text)
     console.log(`✅ Step 6 — ${relevantChunks.length} chunks reranked and ready`)
 
@@ -115,7 +120,6 @@ const pdf = async (req: Request, res: Response) => {
     // fetch the full tree from Supabase and pass to Groq
     let repoContext: { repoName: string; tree: any[] } | undefined
 
-    const isRepoQuery    = filterSource?.startsWith("github:")
     const isStructural   = isStructuralQuery(query)
 
     if (isRepoQuery) {
