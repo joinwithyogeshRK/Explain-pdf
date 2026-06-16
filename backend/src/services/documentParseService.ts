@@ -14,11 +14,13 @@ const PDF2JSON_MAX_SIZE_BYTES = Number(
 const PDF_PARSE_MAX_SIZE_BYTES = Number(
   process.env.PDF_PARSE_MAX_SIZE_BYTES ?? 20 * 1024 * 1024,
 );
+const LLAMA_PARSE_FILES_BASE_URL = `${LLAMA_PARSE_BASE_URL}/api/v1/beta`;
 
 export type ExtractionMethod = "pdf2json" | "pdf-parse" | "llamaparse";
 
 interface LlamaParseResultResponse {
   job?: {
+    id?: string;
     status?: string;
     error_message?: string | null;
   };
@@ -86,29 +88,22 @@ function describeLlamaParseError(error: unknown): string {
   return `LlamaParse request failed with status ${error.response?.status ?? "unknown"}`;
 }
 
-async function parseWithLlamaParse(
+async function uploadFileToLlamaCloud(
   fileBuffer: Buffer,
   fileName: string,
   mimeType: string,
+  apiKey: string,
 ): Promise<string> {
-  const apiKey = getLlamaCloudApiKey();
-
-  const configuration = JSON.stringify({
-    tier: LLAMA_PARSE_TIER,
-    version: LLAMA_PARSE_VERSION,
-  });
-
   const formData = new FormData();
   formData.append("file", fileBuffer, {
     filename: fileName,
     contentType: mimeType || "application/octet-stream",
   });
-  formData.append("configuration", configuration);
+  formData.append("purpose", "parse");
 
-  let upload;
   try {
-    upload = await axios.post(
-      `${LLAMA_PARSE_BASE_URL}/api/v2alpha1/parse/upload`,
+    const response = await axios.post(
+      `${LLAMA_PARSE_FILES_BASE_URL}/files`,
       formData,
       {
         headers: {
@@ -120,17 +115,52 @@ async function parseWithLlamaParse(
         timeout: LLAMA_PARSE_TIMEOUT_MS,
       },
     );
+    const fileId: string = response.data.id;
+    if (!fileId) {
+      console.error("[LlamaParse] File upload response missing id:", JSON.stringify(response.data).slice(0, 500));
+      throw new Error("LlamaParse file upload did not return a file id.");
+    }
+    return fileId;
   } catch (error) {
-    console.error("[LlamaParse] Upload+parse failed:", JSON.stringify(error instanceof Error ? error.message : error).slice(0, 500));
+    console.error("[LlamaParse] File upload failed:", JSON.stringify(error instanceof Error ? error.message : error).slice(0, 500));
     throw new Error(describeLlamaParseError(error));
   }
+}
 
-  const jobId = upload.data.id;
-  if (!jobId) {
-    console.error("[LlamaParse] Upload response missing job id:", JSON.stringify(upload.data).slice(0, 500));
-    throw new Error("LlamaParse did not return a job id.");
+async function createParseJob(
+  fileId: string,
+  apiKey: string,
+): Promise<string> {
+  try {
+    const response = await axios.post(
+      `${LLAMA_PARSE_BASE_URL}/api/v2/parse`,
+      {
+        file_id: fileId,
+        tier: LLAMA_PARSE_TIER,
+        version: LLAMA_PARSE_VERSION,
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        timeout: LLAMA_PARSE_TIMEOUT_MS,
+      },
+    );
+    const jobId: string = response.data.job?.id || response.data.id;
+    if (!jobId) {
+      console.error("[LlamaParse] Parse job creation response missing job id:", JSON.stringify(response.data).slice(0, 500));
+      throw new Error("LlamaParse did not return a job id.");
+    }
+    return jobId;
+  } catch (error) {
+    console.error("[LlamaParse] Parse job creation failed:", JSON.stringify(error instanceof Error ? error.message : error).slice(0, 500));
+    throw new Error(describeLlamaParseError(error));
   }
+}
 
+async function pollParseJob(jobId: string, apiKey: string): Promise<string> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < LLAMA_PARSE_TIMEOUT_MS) {
     let result;
@@ -171,6 +201,22 @@ async function parseWithLlamaParse(
   }
 
   throw new Error("LlamaParse timed out while parsing this file.");
+}
+
+async function parseWithLlamaParse(
+  fileBuffer: Buffer,
+  fileName: string,
+  mimeType: string,
+): Promise<string> {
+  const apiKey = getLlamaCloudApiKey();
+
+  const fileId = await uploadFileToLlamaCloud(fileBuffer, fileName, mimeType, apiKey);
+  console.log(`[LlamaParse] File uploaded: ${fileId}`);
+
+  const jobId = await createParseJob(fileId, apiKey);
+  console.log(`[LlamaParse] Parse job created: ${jobId}`);
+
+  return pollParseJob(jobId, apiKey);
 }
 
 const tryPdfParse = async (buffer: Buffer): Promise<string> => {

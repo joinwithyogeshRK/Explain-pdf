@@ -1,6 +1,6 @@
 import type { Request, Response } from "express"
 import { createClient } from "@supabase/supabase-js"
-import { extractTextFromPDF } from "../services/ocrService.js"
+import { extractTextFromFile } from "../services/documentParseService.js"
 import { chunkText } from "../rag/chunker.js"
 import { embedChunks, embedQuery } from "../rag/embedder.js"
 import { storeInPinecone } from "../rag/pinecone.js"
@@ -56,7 +56,7 @@ const pdf = async (req: Request, res: Response) => {
       let text: string
 
       try {
-        const result = await extractTextFromPDF(file.buffer, file.originalname)
+        const result = await extractTextFromFile(file.buffer, file.originalname, file.mimetype)
         text = result.text
         console.log(`✅ Step 1 — Text extracted via ${result.method} (${text.length} chars)`)
       } catch (extractionError: unknown) {
