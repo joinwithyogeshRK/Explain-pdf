@@ -16,6 +16,39 @@ const API = import.meta.env.VITE_API_URL ?? "http://localhost:3009"
 
 const CHAT_QUERY_KEY = "chat"
 
+const isTechnicalApiError = (message: string) =>
+  /body\.|field required|LlamaParse|multipart|ECONNREFUSED|status \d{3}/i.test(
+    message,
+  )
+
+const toUserFacingError = (
+  err: unknown,
+  fallback = "Something went wrong. Please try again.",
+): string => {
+  if (!axios.isAxiosError(err)) return fallback
+
+  const status = err.response?.status
+  const bodyErr = err.response?.data?.error
+
+  if (status !== undefined && status >= 500) {
+    return "Something went wrong on our end. Please try again in a moment."
+  }
+
+  if (status === 422) {
+    return "We couldn't process this document. Try a different PDF or DOCX file."
+  }
+
+  if (typeof bodyErr === "string" && bodyErr) {
+    if (isTechnicalApiError(bodyErr)) return fallback
+    if (/_KEY|SECRET|TOKEN|password|environment variable/i.test(bodyErr)) {
+      return fallback
+    }
+    return bodyErr
+  }
+
+  return fallback
+}
+
 const getUrlChatId = () => new URLSearchParams(window.location.search).get(CHAT_QUERY_KEY)
 
 const replaceUrlParams = (params: URLSearchParams) => {
@@ -356,9 +389,15 @@ const ChatPage = () => {
         } else if (status === 429) {
           errorMsg = "GitHub API rate limit hit. Please wait an hour and try again."
         } else if (status === 422) {
-          errorMsg = bodyErr ?? "No indexable files found in this repository."
-        } else if (typeof bodyErr === "string" && bodyErr) {
-          errorMsg = bodyErr
+          errorMsg =
+            typeof bodyErr === "string" && bodyErr && !isTechnicalApiError(bodyErr)
+              ? bodyErr
+              : "No indexable files found in this repository."
+        } else {
+          errorMsg = toUserFacingError(
+            err,
+            "Failed to index repository. Please try again.",
+          )
         }
       }
 
@@ -468,7 +507,10 @@ const ChatPage = () => {
       const res = await axios.post(`${API}/query`, fd, {
         headers: await authHeaders(),
       })
-      const text = res.data?.text ?? JSON.stringify(res.data)
+      const text = res.data?.text
+      if (typeof text !== "string" || !text.trim()) {
+        throw new Error("empty_response")
+      }
 
       if (file) void fetchDocuments()
 
@@ -479,22 +521,12 @@ const ChatPage = () => {
       }
       typewriterStream(text, q)
     } catch (err: unknown) {
-      let errorMsg = "Something went wrong. Please try again."
-      if (axios.isAxiosError(err)) {
-        const status = err.response?.status
-        const bodyErr = err.response?.data?.error
-        if (status !== undefined && status >= 500) {
-          errorMsg = "Something went wrong on our end. Please try again in a moment."
-        } else if (
-          typeof bodyErr === "string" &&
-          bodyErr &&
-          !/_KEY|SECRET|TOKEN|password|environment variable/i.test(bodyErr)
-        ) {
-          errorMsg = bodyErr
-        }
-      }
       setIsStreaming(false)
-      typewriterStream(errorMsg, q)
+      const fallback =
+        err instanceof Error && err.message === "empty_response"
+          ? "We couldn't generate a response. Please try again."
+          : "Something went wrong. Please try again."
+      typewriterStream(toUserFacingError(err, fallback), q)
     }
   }
 

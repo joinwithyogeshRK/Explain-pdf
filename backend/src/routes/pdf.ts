@@ -62,9 +62,16 @@ const pdf = async (req: Request, res: Response) => {
       } catch (extractionError: unknown) {
         console.error("PDF extraction failed:", extractionError)
         const msg  = extractionError instanceof Error ? extractionError.message : ""
-        const safe = msg && !/_KEY|SECRET|TOKEN|password|environment variable/i.test(msg)
+        const technical =
+          !msg ||
+          /body\.|field required|LlamaParse request failed|multipart/i.test(msg)
+        const safe =
+          !technical &&
+          !/_KEY|SECRET|TOKEN|password|environment variable/i.test(msg)
         return res.status(422).json({
-          error: safe ? msg : "We couldn't process this PDF. Try a different file or a smaller PDF.",
+          error: safe
+            ? msg
+            : "We couldn't process this document. Try a different PDF or DOCX file.",
         })
       }
 

@@ -14,7 +14,7 @@ const PDF2JSON_MAX_SIZE_BYTES = Number(
 const PDF_PARSE_MAX_SIZE_BYTES = Number(
   process.env.PDF_PARSE_MAX_SIZE_BYTES ?? 20 * 1024 * 1024,
 );
-const LLAMA_PARSE_FILES_URL = `${LLAMA_PARSE_BASE_URL}/api/v1/files`;
+const LLAMA_PARSE_FILES_URL = `${LLAMA_PARSE_BASE_URL}/api/v1/beta/files`;
 
 export type ExtractionMethod = "pdf2json" | "pdf-parse" | "llamaparse";
 
