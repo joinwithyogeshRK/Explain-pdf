@@ -1,16 +1,8 @@
-// ============================================================
-// Code-Aware Chunker
-// Chunks code files by function/class boundaries
-// Falls back to line-based chunking for other files
-// ============================================================
-
-const MAX_CHUNK_SIZE = 1500   // code chunks can be bigger
+const MAX_CHUNK_SIZE = 1500
 const MIN_CHUNK_SIZE = 50
-const OVERLAP_LINES  = 3      // lines of overlap between chunks
+const OVERLAP_LINES  = 3
 
-// ─────────────────────────────────────────────────────────────
-// FILE TYPE DETECTION
-// ─────────────────────────────────────────────────────────────
+
 
 function isCodeFile(ext: string): boolean {
   return [
@@ -24,10 +16,14 @@ function isMarkdown(ext: string): boolean {
   return ['.md', '.mdx', '.txt', '.rst'].includes(ext)
 }
 
-// ─────────────────────────────────────────────────────────────
-// DETECT CHUNK BOUNDARIES IN CODE
-// A boundary is: function/class/export declaration start
-// ─────────────────────────────────────────────────────────────
+
+
+// BOUNDARY DETECTION
+// isCodeBoundary is a pure pattern match — it does NOT know about nesting.
+// "Top level" is decided separately in chunkCodeFile via brace depth +
+// indentation, so a `function` keyword found inside another function body
+// is never mistaken for a real chunk boundary.
+
 
 function isCodeBoundary(line: string): boolean {
   const trimmed = line.trim()
@@ -43,137 +39,182 @@ function isCodeBoundary(line: string): boolean {
   )
 }
 
-// ─────────────────────────────────────────────────────────────
-// CHUNK A CODE FILE
-// Splits at function/class boundaries
-// ─────────────────────────────────────────────────────────────
+// Best-effort net brace count for a line. Doesn't understand strings or
+// comments, so a `{` inside a template literal will throw the counter off
+// slightly — acceptable for a heuristic chunker, not acceptable for a
+// real parser. Use tree-sitter if you need exact accuracy here.
+function countNetBraces(line: string): number {
+  const opens  = (line.match(/{/g) || []).length
+  const closes = (line.match(/}/g) || []).length
+  return opens - closes
+}
+
+
 
 function chunkCodeFile(content: string, filePath: string): string[] {
-  const lines    = content.split('\n')
-  const chunks:  string[] = []
-  let   current: string[] = []
+  const lines      = content.split('\n')
+  const rawChunks: string[] = []
+  let   current:   string[] = []
+  let   currentLen = 0        // running length — avoids re-joining every line (was O(n^2))
+  let   braceDepth = 0        // 0 == not nested inside any unclosed { }
+
+  const pushCurrent = () => {
+    const text = current.join('\n').trim()
+    if (text.length > 0) rawChunks.push(text)
+  }
+
+  const resetWithOverlap = (i: number, inclusive: boolean) => {
+    const end = inclusive ? i + 1 : i
+    current    = lines.slice(Math.max(0, i - OVERLAP_LINES), end)
+    currentLen = current.reduce((n, l) => n + l.length + 1, 0)
+  }
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? ''
+    const line       = lines[i] ?? ''
+    const indentation = line.length - line.trimStart().length
 
-    // Hit a boundary AND current chunk has content → save it
-    if (isCodeBoundary(line) && current.length > 0) {
-      const text = current.join('\n').trim()
-      if (text.length >= MIN_CHUNK_SIZE) {
-        // Prepend file path so LLM knows where this code lives
-        chunks.push(`// File: ${filePath}\n${text}`)
-      }
-      // Start new chunk with overlap from previous
-      current = lines.slice(Math.max(0, i - OVERLAP_LINES), i)
+    // Only a real split point if we're not nested inside another
+    // block (brace depth 0) AND not indented inside another function
+    // (covers Python, which has no braces at all).
+    const isTopLevel = braceDepth === 0 && indentation === 0
+
+    if (isCodeBoundary(line) && isTopLevel && current.length > 0) {
+      pushCurrent()
+      resetWithOverlap(i, false)
     }
 
     current.push(line)
+    currentLen += line.length + 1
+    braceDepth += countNetBraces(line)
 
-    // If chunk is getting too large → force split
-    if (current.join('\n').length > MAX_CHUNK_SIZE) {
-      const text = current.join('\n').trim()
-      if (text.length >= MIN_CHUNK_SIZE) {
-        chunks.push(`// File: ${filePath}\n${text}`)
-      }
-      current = lines.slice(Math.max(0, i - OVERLAP_LINES), i + 1)
+    if (currentLen > MAX_CHUNK_SIZE) {
+      pushCurrent()
+      resetWithOverlap(i, true)
     }
   }
 
-  // Last chunk
-  if (current.length > 0) {
-    const text = current.join('\n').trim()
-    if (text.length >= MIN_CHUNK_SIZE) {
-      chunks.push(`// File: ${filePath}\n${text}`)
-    }
-  }
+  pushCurrent()
 
-  return chunks
+  return finalizeChunks(rawChunks, filePath)
 }
 
-// ─────────────────────────────────────────────────────────────
-// CHUNK A MARKDOWN / TEXT FILE
-// Splits at heading boundaries
-// ─────────────────────────────────────────────────────────────
+
 
 function chunkMarkdownFile(content: string, filePath: string): string[] {
-  const sections = content.split(/^#{1,3}\s+/m)
-  const chunks:   string[] = []
+  const lines       = content.split('\n')
+  const rawSections: string[] = []
+  let   current:     string[] = []
 
-  for (const section of sections) {
+  // Manual split that keeps the heading line attached to its section
+  // (the old regex split discarded every heading).
+  for (const line of lines) {
+    if (/^#{1,3}\s+/.test(line) && current.length > 0) {
+      rawSections.push(current.join('\n'))
+      current = []
+    }
+    current.push(line)
+  }
+  if (current.length > 0) rawSections.push(current.join('\n'))
+
+  const rawChunks: string[] = []
+
+  for (const section of rawSections) {
     const text = section.trim()
-    if (text.length < MIN_CHUNK_SIZE) continue
+    if (text.length === 0) continue
 
     if (text.length <= MAX_CHUNK_SIZE) {
-      chunks.push(`// File: ${filePath}\n${text}`)
-    } else {
-      // Split large sections by paragraph
-      const paras = text.split(/\n\n+/)
-      let   current = ''
-      for (const para of paras) {
-        if ((current + '\n\n' + para).length <= MAX_CHUNK_SIZE) {
-          current = current ? current + '\n\n' + para : para
-        } else {
-          if (current.length >= MIN_CHUNK_SIZE) {
-            chunks.push(`// File: ${filePath}\n${current}`)
-          }
-          current = para
-        }
-      }
-      if (current.length >= MIN_CHUNK_SIZE) {
-        chunks.push(`// File: ${filePath}\n${current}`)
+      rawChunks.push(text)
+      continue
+    }
+
+    const paras = text.split(/\n\n+/)
+    let   para_acc = ''
+    for (const para of paras) {
+      if ((para_acc + '\n\n' + para).length <= MAX_CHUNK_SIZE) {
+        para_acc = para_acc ? para_acc + '\n\n' + para : para
+      } else {
+        if (para_acc.length > 0) rawChunks.push(para_acc)
+        para_acc = para
       }
     }
+    if (para_acc.length > 0) rawChunks.push(para_acc)
   }
 
-  return chunks
+  return finalizeChunks(rawChunks, filePath)
 }
 
-// ─────────────────────────────────────────────────────────────
-// CHUNK A CONFIG / JSON / YAML FILE
-// Treat as plain text, split by size
-// ─────────────────────────────────────────────────────────────
+
 
 function chunkConfigFile(content: string, filePath: string): string[] {
   if (content.length <= MAX_CHUNK_SIZE) {
-    return content.length >= MIN_CHUNK_SIZE
-      ? [`// File: ${filePath}\n${content}`]
-      : []
+    return finalizeChunks(content.trim().length > 0 ? [content] : [], filePath)
   }
 
-  const lines   = content.split('\n')
-  const chunks: string[] = []
-  let   current = ''
+  const lines     = content.split('\n')
+  const rawChunks: string[] = []
+  let   current   = ''
 
   for (const line of lines) {
     if ((current + '\n' + line).length <= MAX_CHUNK_SIZE) {
       current = current ? current + '\n' + line : line
     } else {
-      if (current.length >= MIN_CHUNK_SIZE) {
-        chunks.push(`// File: ${filePath}\n${current}`)
-      }
+      if (current.length > 0) rawChunks.push(current)
       current = line
     }
   }
+  if (current.length > 0) rawChunks.push(current)
 
-  if (current.length >= MIN_CHUNK_SIZE) {
-    chunks.push(`// File: ${filePath}\n${current}`)
-  }
-
-  return chunks
+  return finalizeChunks(rawChunks, filePath)
 }
 
-// ─────────────────────────────────────────────────────────────
-// EXTRACT EXTENSION FROM FILENAME ONLY (not full path)
-// dotIdx > 0 guards against hidden files like '.eslintrc'
-// where the dot is at position 0 — those have no real extension.
-// ─────────────────────────────────────────────────────────────
+
+
+// SHARED FINALIZE STEP
+// Merges any fragment under MIN_CHUNK_SIZE into a neighbor instead of
+// dropping it, then applies the `// File: ...` header once, consistently,
+// across all three chunkers.
+
+
+function finalizeChunks(rawChunks: string[], filePath: string): string[] {
+  const cleaned = rawChunks.map(c => c.trim()).filter(c => c.length > 0)
+  if (cleaned.length === 0) return []
+
+  const merged: string[] = []
+  for (const chunk of cleaned) {
+    const prev = merged[merged.length - 1]
+    if (
+      prev !== undefined &&
+      prev.length < MIN_CHUNK_SIZE &&
+      prev.length + chunk.length <= MAX_CHUNK_SIZE
+    ) {
+      merged[merged.length - 1] = `${prev}\n${chunk}`
+    } else {
+      merged.push(chunk)
+    }
+  }
+
+  // fold a too-small trailing fragment backward into its neighbor
+  if (merged.length > 1) {
+    const last = merged[merged.length - 1]!
+    if (last.length < MIN_CHUNK_SIZE) {
+      merged[merged.length - 2] += '\n' + last
+      merged.pop()
+    }
+  }
+
+  return merged.map(c => `// File: ${filePath}\n${c}`)
+}
+
+
+
+// PUBLIC API — signatures unchanged so existing callers keep working
+
 
 export function extractExt(filePath: string): { ext: string; compoundExt: string } {
-  const fileName    = filePath.split('/').pop() ?? ''
-  const dotIdx      = fileName.lastIndexOf('.')
-  const ext         = dotIdx > 0 ? fileName.slice(dotIdx).toLowerCase() : ''
+  const fileName = filePath.split('/').pop() ?? ''
+  const dotIdx   = fileName.lastIndexOf('.')
+  const ext      = dotIdx > 0 ? fileName.slice(dotIdx).toLowerCase() : ''
 
-  // Compound ext: 'file.min.js' → '.min.js', 'file.env.example' → '.env.example'
   const parts       = fileName.split('.')
   const compoundExt = parts.length > 2
     ? ('.' + parts.slice(1).join('.')).toLowerCase()
@@ -182,9 +223,6 @@ export function extractExt(filePath: string): { ext: string; compoundExt: string
   return { ext, compoundExt }
 }
 
-// ─────────────────────────────────────────────────────────────
-// MAIN EXPORT
-// ─────────────────────────────────────────────────────────────
 
 export function chunkCodeContent(
   content:  string,
