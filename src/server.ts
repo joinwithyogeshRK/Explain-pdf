@@ -10,7 +10,7 @@ import documentRouter from "./routes/document.js";
 import transcribeRouter from "./routes/transcribe.js";
 
 const defaultOrigins = [
-  "https://advanced-rag-pipeline.vercel.app",
+  "https://explain-pdf-main.vercel.app",
   "http://localhost:5173",
 ];
 const origins =
