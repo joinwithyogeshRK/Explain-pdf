@@ -11,6 +11,13 @@ import {
   getChatMessagesForUser,
   saveMessage,
 } from "../services/historyService.js"
+import { casualReply, isCasualMessage } from "../lib/queryGuards.js"
+
+const getStringField = (value: unknown): string | undefined => {
+  if (typeof value === "string") return value
+  if (Array.isArray(value)) return getStringField(value[0])
+  return undefined
+}
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -19,12 +26,13 @@ const supabase = createClient(
 
 const query = async (req: Request, res: Response) => {
   try {
-    const question = req.body.query
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const question = getStringField(body.query)?.trim()
     const userId = req.supabaseUserId!
-    let chatId = req.body.chatId
-    const filterSource = req.body.filterSource as string | undefined
+    let chatId = getStringField(body.chatId)
+    const filterSource = getStringField(body.filterSource)
 
-    if (!question || !question.trim()) {
+    if (!question) {
       return res.status(400).json({ error: "No query provided." })
     }
 
@@ -32,6 +40,31 @@ const query = async (req: Request, res: Response) => {
       if (!filterSource) return undefined
       return { source: filterSource }
     })()
+
+    const isRepoQuery = filterSource?.startsWith("github:") ?? false
+    const repoName = isRepoQuery ? filterSource!.replace("github:", "") : undefined
+    const isStructural = isStructuralQuery(question)
+
+    if (repoName && isCasualMessage(question)) {
+      const answer = casualReply(repoName)
+
+      const savedChatId = chatId ?? (await createChat(userId, question)).id
+      chatId = savedChatId
+
+      await saveMessage(savedChatId, userId, question, answer, false)
+
+      return res.json({
+        text: answer,
+        chatId: chatId ?? null,
+        meta: {
+          source: filterSource,
+          filter: metadataFilter ?? null,
+          pipeline: "guard",
+          repoTreeInjected: false,
+          structuralQuery: false,
+        },
+      })
+    }
 
     const retrievalTopK = Number(process.env.CODE_RETRIEVAL_TOP_K ?? 8)
     const rerankTopN = Number(process.env.CODE_RERANK_TOP_N ?? 5)
@@ -51,12 +84,8 @@ const query = async (req: Request, res: Response) => {
     const relevantChunks = reranked.map((c) => c.text)
 
     let repoContext: { repoName: string; tree: any[] } | undefined
-    const isRepoQuery = filterSource?.startsWith("github:") ?? false
-    const isStructural = isStructuralQuery(question)
 
-    if (isRepoQuery) {
-      const repoName = filterSource!.replace("github:", "")
-
+    if (repoName) {
       if (isStructural) {
         const { data, error } = await supabase
           .from("repo_trees")
@@ -88,18 +117,16 @@ const query = async (req: Request, res: Response) => {
       ])
     }
 
-    const answer = await askGroq(question, relevantChunks, conversationHistory, repoContext, "code")
+    const answer = await askGroq(question, relevantChunks, conversationHistory, repoContext)
 
     evalRAG(question, relevantChunks, answer).catch((err) =>
       console.warn("⚠️  Eval failed silently:", err),
     )
 
-    if (!chatId) {
-      const newChat = await createChat(userId, question)
-      chatId = newChat.id
-    }
+    const savedChatId = chatId ?? (await createChat(userId, question)).id
+    chatId = savedChatId
 
-    await saveMessage(chatId, userId, question, answer, false)
+    await saveMessage(savedChatId, userId, question, answer, false)
 
     res.json({
       text: answer,

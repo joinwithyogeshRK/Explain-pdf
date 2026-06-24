@@ -1,11 +1,7 @@
 import { Router, type Request, type Response } from "express"
 import { createClient } from "@supabase/supabase-js"
 import { requireClerkSession } from "../middleware/requireClerk.js"
-import {
-  getPineconeIndex,
-  PINECONE_VECTOR_DIMENSION,
-  RAG_INDEX_NAME,
-} from "../rag/pinecone.js"
+import { getPineconeIndex, RAG_INDEX_NAME } from "../rag/pinecone.js"
 
 const router = Router()
 const supabase = createClient(
@@ -49,10 +45,7 @@ router.delete("/delete", async (req: Request, res: Response) => {
 
     const repoName = source.replace("github:", "")
     const index = getPineconeIndex(RAG_INDEX_NAME)
-    const queryRes = await index.query({
-      vector: new Array(PINECONE_VECTOR_DIMENSION).fill(0),
-      topK: 10000,
-      includeMetadata: false,
+    await index.deleteMany({
       filter: {
         $and: [
           { userId: { $eq: userId } },
@@ -60,14 +53,6 @@ router.delete("/delete", async (req: Request, res: Response) => {
         ],
       },
     })
-
-    const ids = (queryRes.matches ?? []).map((match) => match.id)
-    if (ids.length > 0) {
-      const BATCH = 1000
-      for (let i = 0; i < ids.length; i += BATCH) {
-        await index.deleteMany({ ids: ids.slice(i, i + BATCH) })
-      }
-    }
 
     const { error: treeError } = await supabase
       .from("repo_trees")
@@ -83,7 +68,7 @@ router.delete("/delete", async (req: Request, res: Response) => {
       .eq("repo_name", repoName)
     if (filesError) throw filesError
 
-    res.json({ success: true, source, pineconeVectorsDeleted: ids.length })
+    res.json({ success: true, source })
   } catch (err) {
     console.error("DELETE /documents/delete repo error:", err)
     res.status(500).json({ error: "Failed to delete repository" })

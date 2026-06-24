@@ -492,11 +492,11 @@ const ChatPage = () => {
   const handleSend = async () => {
     if (!signedIn || !message.trim() || isStreaming) return
     const q = message.trim()
-    const fd = new FormData()
-    if (file) fd.append("File", file)
-    fd.append("query", q)
-    if (chatId) fd.append("chatId", chatId)
-    if (selectedSource !== "all") fd.append("filterSource", selectedSource)
+    const payload = {
+      query: q,
+      ...(chatId ? { chatId } : {}),
+      ...(selectedSource !== "all" ? { filterSource: selectedSource } : {}),
+    }
 
     setMessage("")
     setFile(null)
@@ -504,9 +504,21 @@ const ChatPage = () => {
     setIsStreaming(true)
 
     try {
-      const res = await axios.post(`${API}/query`, fd, {
-        headers: await authHeaders(),
-      })
+      const headers = await authHeaders()
+      const res = file
+        ? await axios.post(
+            `${API}/query`,
+            (() => {
+              const fd = new FormData()
+              fd.append("File", file)
+              Object.entries(payload).forEach(([key, value]) => fd.append(key, value))
+              return fd
+            })(),
+            { headers },
+          )
+        : await axios.post(`${API}/query`, payload, {
+            headers: { ...headers, "Content-Type": "application/json" },
+          })
       const text = res.data?.text
       if (typeof text !== "string" || !text.trim()) {
         throw new Error("empty_response")
