@@ -51,7 +51,7 @@ router.delete("/delete", async (req: Request, res: Response) => {
     const userId = req.supabaseUserId!
     const { source } = req.body as { source?: string }
 
-    if (!source?.trim() || source.startsWith("github:")) {
+    if (!source?.trim()) {
       res.status(400).json({ error: "PDF source is required" })
       return
     }

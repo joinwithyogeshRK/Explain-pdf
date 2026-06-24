@@ -205,8 +205,6 @@ export const searchPineconeText = async (
       PINECONE_TEXT_FIELD,
       "source",
       "sourceType",
-      "filePath",
-      "repoName",
       "pdfName",
       "uploadedAt",
       "chunkIndex",
